@@ -7,4 +7,4 @@
 - Phase 4 이후에는 매 Phase 종료 시 전체 테스트 회귀 실행
 - 아키텍처: 코어 로직(src/core)은 렌더링/입력과 분리된 순수 함수 — DOM/Canvas 의존 금지
 - 튜닝값(DAS/ARR/락 딜레이 등)은 config 상수로 관리
-- 현재 진행: Phase 5 완료 (다음: Phase 6 — 2인용 배틀 모드)
+- 현재 진행: Phase 6 완료 (다음: Phase 7 — 메뉴/폴리싱)

@@ -25,8 +25,38 @@ export const SOLO_KEYS: KeyBindings = {
   hold: ['KeyC', 'ShiftLeft', 'ShiftRight'],
 };
 
+// PRD 5.2 — 2인용 키 배치 (한 키보드, 고스팅 방지를 위해 영역 분산)
+export const VERSUS_KEYS: readonly [KeyBindings, KeyBindings] = [
+  {
+    left: ['KeyA'],
+    right: ['KeyD'],
+    softDrop: ['KeyS'],
+    hardDrop: ['KeyW'],
+    rotateCW: ['KeyF'],
+    rotateCCW: ['KeyG'],
+    hold: ['KeyR', 'KeyQ'],
+  },
+  {
+    left: ['ArrowLeft'],
+    right: ['ArrowRight'],
+    softDrop: ['ArrowDown'],
+    hardDrop: ['ArrowUp'],
+    rotateCW: ['Period'],
+    rotateCCW: ['Comma'],
+    hold: ['Slash'],
+  },
+];
+
+// PRD 3.2 — 2인용 배틀 규칙
+export const VERSUS_BASE_LEVEL = 5; // 낙하 속도 고정 시작 레벨
+export const VERSUS_LEVEL_UP_MS = 5 * 60_000; // 5분마다 한 단계 상승
+export const VERSUS_TARGET_WINS = 2; // 3판 2선승
+
 export const PAUSE_KEYS: readonly string[] = ['Escape', 'KeyP'];
 export const RESTART_KEYS: readonly string[] = ['KeyR'];
+export const MODE_SOLO_KEYS: readonly string[] = ['Digit1'];
+export const MODE_VERSUS_KEYS: readonly string[] = ['Digit2'];
+export const NEXT_ROUND_KEYS: readonly string[] = ['Space'];
 
 export function allBindingCodes(bindings: KeyBindings): string[] {
   return [

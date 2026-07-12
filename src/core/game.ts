@@ -4,6 +4,7 @@
 
 import { SevenBag } from './bag';
 import {
+  addGarbageLines,
   BOARD_HEIGHT,
   BOARD_WIDTH,
   BUFFER_ROWS,
@@ -13,6 +14,7 @@ import {
   lockPiece,
   type Board,
 } from './board';
+import { attackLines, GarbageQueue } from './garbage';
 import {
   fallIntervalMs,
   LOCK_DELAY_MS,
@@ -33,13 +35,14 @@ export interface ActivePiece {
 export type GamePhase = 'falling' | 'locking' | 'gameover';
 
 export interface LockResult {
-  seq: number; // 고정 이벤트 순번 — 렌더러가 새 이벤트 감지에 사용
+  seq: number; // 고정 이벤트 순번 — 렌더러/매치가 새 이벤트 감지에 사용
   linesCleared: number;
   clearedRows: number[];
   tspin: boolean;
   points: number; // 이번 고정으로 얻은 클리어 점수 (드롭 점수 제외)
   backToBack: boolean;
   combo: number;
+  attack: number; // 상쇄 후 상대에게 전송할 가비지 라인 수 (2인용)
 }
 
 export interface GameOptions {
@@ -47,6 +50,8 @@ export interface GameOptions {
   level?: number;
   /** false면 레벨이 고정된다 (2인용 배틀 모드) */
   autoLevelUp?: boolean;
+  /** 가비지 구멍 위치용 rng — bag rng와 분리해 2인용 블록 순서 공정성을 지킨다 */
+  garbageRng?: () => number;
 }
 
 export class Game {
@@ -59,10 +64,14 @@ export class Game {
   /** 가장 최근 lock의 클리어 결과 (이펙트/점수 계산용) */
   lastLock: LockResult | null = null;
 
+  /** 대기 중인 가비지 — 매치(2인용)가 상대 공격을 여기에 쌓는다 */
+  readonly garbage = new GarbageQueue();
+
   private readonly bag: SevenBag;
   private readonly tracker = new ScoreTracker();
   private readonly baseLevel: number;
   private readonly autoLevelUp: boolean;
+  private readonly garbageRng: () => number;
   private holdUsed = false;
   private softDropping = false;
   private gravityAcc = 0;
@@ -76,6 +85,7 @@ export class Game {
     this.baseLevel = opts.level ?? 1;
     this.level = this.baseLevel;
     this.autoLevelUp = opts.autoLevelUp ?? true;
+    this.garbageRng = opts.garbageRng ?? Math.random;
     this.spawn();
   }
 
@@ -258,6 +268,16 @@ export class Game {
 
     const lockScore = this.tracker.onLock({ lines: result.linesCleared, tspin }, this.level);
     if (this.autoLevelUp) this.level = levelForLines(this.baseLevel, this.totalLines);
+
+    // 공격량 계산 → 대기 가비지와 상쇄 → 잔여분만 상대에게 전송 (PRD 3.2)
+    const rawAttack = attackLines({
+      lines: result.linesCleared,
+      tspin,
+      backToBack: lockScore.backToBack,
+      combo: lockScore.combo,
+    });
+    const attack = this.garbage.offset(rawAttack);
+
     this.lastLock = {
       seq: ++this.lockSeq,
       linesCleared: result.linesCleared,
@@ -266,12 +286,22 @@ export class Game {
       points: lockScore.points,
       backToBack: lockScore.backToBack,
       combo: lockScore.combo,
+      attack,
     };
 
     if (allInBuffer) {
       this.active = null;
       this.phase = 'gameover';
       return;
+    }
+
+    // 라인을 지우지 못한 고정이면 대기 가비지가 이번 lock 직후 올라온다
+    if (result.linesCleared === 0 && this.garbage.total > 0) {
+      const count = this.garbage.flush();
+      const holes = Array.from({ length: count }, () =>
+        Math.floor(this.garbageRng() * BOARD_WIDTH),
+      );
+      this.board = addGarbageLines(this.board, holes);
     }
     this.spawn();
   }

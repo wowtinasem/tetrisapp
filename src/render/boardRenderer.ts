@@ -57,6 +57,14 @@ export class BoardRenderer {
       }
     }
 
+    // 대기 가비지 게이지 (왼쪽 가장자리 빨간 바, PRD 3.2)
+    const pending = game.garbage.total;
+    if (pending > 0) {
+      const gaugeHeight = Math.min(pending, VISIBLE_ROWS) * cellSize;
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(0, this.canvas.height - gaugeHeight, 4, gaugeHeight);
+    }
+
     if (!game.active) return;
     const { type, rotation, x: px } = game.active;
     const shape = getShape(type, rotation);

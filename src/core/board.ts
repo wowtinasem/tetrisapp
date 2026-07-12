@@ -54,6 +54,18 @@ export interface ClearResult {
   clearedRows: number[];
 }
 
+/**
+ * 가비지 라인을 보드 하단에 올린 새 보드를 반환 (원본 불변).
+ * holes[i] = i번째 가비지 줄의 빈 칸 열. 기존 줄은 위로 밀려나고 맨 위 줄은 사라진다.
+ */
+export function addGarbageLines(board: Board, holes: readonly number[]): Board {
+  if (holes.length === 0) return board;
+  const garbageRows: CellValue[][] = holes.map((hole) =>
+    Array.from({ length: BOARD_WIDTH }, (_, x) => (x === hole ? null : 'G') as CellValue),
+  );
+  return [...board.slice(holes.length).map((row) => [...row]), ...garbageRows];
+}
+
 /** 가득 찬 줄을 제거하고 위를 아래로 내린 새 보드를 반환 (원본 불변) */
 export function clearLines(board: Board): ClearResult {
   const clearedRows: number[] = [];
