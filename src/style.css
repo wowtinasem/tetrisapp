@@ -87,6 +87,52 @@ body {
   display: none;
 }
 
+.clear-popup {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+  line-height: 1.3;
+  animation: popup-float 1s ease-out forwards;
+}
+
+.clear-popup-main {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.8);
+}
+
+.clear-popup-sub {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #ffd500;
+}
+
+@keyframes popup-float {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+}
+
 .help {
   position: fixed;
   bottom: 12px;

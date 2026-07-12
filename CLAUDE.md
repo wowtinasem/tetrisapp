@@ -7,4 +7,4 @@
 - Phase 4 이후에는 매 Phase 종료 시 전체 테스트 회귀 실행
 - 아키텍처: 코어 로직(src/core)은 렌더링/입력과 분리된 순수 함수 — DOM/Canvas 의존 금지
 - 튜닝값(DAS/ARR/락 딜레이 등)은 config 상수로 관리
-- 현재 진행: Phase 3 완료 (다음: Phase 4 — 점수 시스템 & T-스핀)
+- 현재 진행: Phase 4 완료 (다음: Phase 5 — 스코어 기록 기능, txt 저장)

@@ -8,6 +8,7 @@ import { DasRepeater } from './input/das';
 import { Keyboard } from './input/keyboard';
 import { BoardRenderer } from './render/boardRenderer';
 import { Hud } from './render/hud';
+import { spawnClearPopup } from './render/popup';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -24,9 +25,11 @@ app.innerHTML = `
 
 const boardCanvas = document.querySelector<HTMLCanvasElement>('#board')!;
 const overlay = document.querySelector<HTMLDivElement>('#overlay')!;
+const boardWrap = document.querySelector<HTMLDivElement>('.board-wrap')!;
 
 let game = new Game();
 let paused = false;
+let lastLockSeq = 0;
 
 const keyboard = new Keyboard(
   new Set([...allBindingCodes(SOLO_KEYS), ...PAUSE_KEYS]),
@@ -45,6 +48,7 @@ function update(deltaMs: number): void {
       game = new Game();
       das.reset();
       paused = false;
+      lastLockSeq = 0;
     }
     return;
   }
@@ -69,7 +73,12 @@ function update(deltaMs: number): void {
 
 function render(): void {
   renderer.draw(game);
-  hud.update(game, 0); // 점수 계산은 Phase 4
+  hud.update(game, game.score);
+
+  if (game.lastLock && game.lastLock.seq !== lastLockSeq) {
+    lastLockSeq = game.lastLock.seq;
+    spawnClearPopup(boardWrap, game.lastLock);
+  }
 
   if (game.phase === 'gameover') {
     overlay.innerHTML = '<div>GAME OVER</div><div class="overlay-sub">R 키로 재시작</div>';

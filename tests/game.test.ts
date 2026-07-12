@@ -103,7 +103,7 @@ describe('하드 드롭과 라인 클리어', () => {
     }
     g.hardDrop();
     expect(g.totalLines).toBe(1);
-    expect(g.lastLock).toEqual({ linesCleared: 1, clearedRows: [BOARD_HEIGHT - 1] });
+    expect(g.lastLock).toMatchObject({ linesCleared: 1, clearedRows: [BOARD_HEIGHT - 1] });
     // O의 윗줄 절반이 한 칸 내려와 바닥 줄에 남음
     expect(g.board[BOARD_HEIGHT - 1]![4]).toBe('O');
     expect(g.board[BOARD_HEIGHT - 1]![0]).toBeNull();
@@ -131,6 +131,80 @@ describe('홀드', () => {
     expect(g.holdActive()).toBe(true); // S ↔ O 교체
     expect(g.active!.type).toBe('O');
     expect(g.heldPiece).toBe('S');
+  });
+});
+
+describe('점수와 T-스핀', () => {
+  /**
+   * T-스핀 더블 슬롯 — T의 가로 행이 row 20을, 아래 돌기가 row 21을 완성한다:
+   *   row 19:  . . . G . . . . . .   (col 3 오버행)
+   *   row 20:  G G G . . . G G G G   (cols 3~5 비움)
+   *   row 21:  G G G G . G G G G G   (col 4만 비움)
+   */
+  function tspinSlotGame(): Game {
+    const g = newGame();
+    const bottom = BOARD_HEIGHT - 1; // 21
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      if (x !== 4) g.board[bottom]![x] = 'G';
+      if (x < 3 || x > 5) g.board[bottom - 1]![x] = 'G';
+    }
+    g.board[bottom - 2]![3] = 'G';
+    return g;
+  }
+
+  it('회전으로 슬롯에 들어간 T는 T-스핀 더블로 판정된다', () => {
+    const g = tspinSlotGame();
+    g.active = { type: 'T', rotation: 0, x: 3, y: BOARD_HEIGHT - 3 };
+    expect(g.rotateActive(1)).toBe(true); // 0 → R
+    expect(g.rotateActive(1)).toBe(true); // R → 2 (아래를 향한 T)
+    g.hardDrop(); // 접지 상태라 이동 0칸 — 마지막 동작은 회전 유지
+    expect(g.lastLock).toMatchObject({ tspin: true, linesCleared: 2 });
+    expect(g.lastLock!.points).toBe(1200); // T-스핀 더블 1200 × 레벨 1
+    expect(g.score).toBe(1200);
+  });
+
+  it('회전 없이 고정되면 같은 슬롯이라도 T-스핀이 아니다', () => {
+    const g = tspinSlotGame();
+    g.active = { type: 'T', rotation: 2, x: 3, y: BOARD_HEIGHT - 3 };
+    g.hardDrop();
+    expect(g.lastLock).toMatchObject({ tspin: false, linesCleared: 2 });
+    expect(g.lastLock!.points).toBe(300); // 일반 더블
+  });
+
+  it('하드 드롭은 2점/칸, 소프트 드롭은 1점/칸', () => {
+    const g = newGame();
+    g.hardDrop(); // O가 y0 → y20으로 20칸 낙하
+    expect(g.score).toBe(40);
+
+    const g2 = newGame();
+    g2.setSoftDrop(true);
+    g2.tick(50); // 1칸 하강
+    expect(g2.score).toBe(1);
+  });
+
+  it('10라인을 채우면 레벨이 오른다', () => {
+    const g = newGame();
+    g.totalLines = 8;
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      if (x !== 4 && x !== 5) {
+        g.board[BOARD_HEIGHT - 1]![x] = 'G';
+        g.board[BOARD_HEIGHT - 2]![x] = 'G';
+      }
+    }
+    g.hardDrop(); // O가 두 줄을 동시에 클리어
+    expect(g.totalLines).toBe(10);
+    expect(g.level).toBe(2);
+    expect(g.lastLock).toMatchObject({ linesCleared: 2, points: 300 });
+  });
+
+  it('autoLevelUp: false면 레벨이 고정된다 (2인용)', () => {
+    const g = new Game({ rng: rng0, level: 5, autoLevelUp: false });
+    g.totalLines = 30;
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      if (x !== 4 && x !== 5) g.board[BOARD_HEIGHT - 1]![x] = 'G';
+    }
+    g.hardDrop();
+    expect(g.level).toBe(5);
   });
 });
 
