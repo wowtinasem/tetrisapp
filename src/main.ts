@@ -14,6 +14,8 @@ import {
   TICK_MS,
   VERSUS_KEYS,
 } from './config';
+import { Sfx } from './audio/sfx';
+import { BOARD_HEIGHT, BOARD_WIDTH } from './core/board';
 import { Game } from './core/game';
 import { DasRepeater } from './input/das';
 import { Keyboard } from './input/keyboard';
@@ -31,11 +33,12 @@ import { Match } from './versus/match';
 type Mode = 'menu' | 'solo' | 'versus';
 
 const RECORDS_KEYS: readonly string[] = ['Tab'];
+const MUTE_KEYS: readonly string[] = ['KeyN'];
 const HELP_TEXT: Record<Mode, string> = {
   menu: '',
-  solo: '←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc 일시정지 · Tab 기록',
+  solo: '←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc 일시정지 · Tab 기록 · N 음소거',
   versus:
-    'P1: A/D 이동 · S 소프트 · W 하드 · F/G 회전 · R/Q 홀드 │ P2: ←→ 이동 · ↓ 소프트 · ↑ 하드 · ./, 회전 · / 홀드 │ Esc 일시정지',
+    'P1: A/D 이동 · S 소프트 · W 하드 · F/G 회전 · R/Q 홀드 │ P2: ←→ 이동 · ↓ 소프트 · ↑ 하드 · ./, 회전 · / 홀드 │ Esc 일시정지 · N 음소거',
 };
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -92,6 +95,7 @@ const keyboard = new Keyboard(
 );
 keyboard.attach();
 
+const sfx = new Sfx();
 const store = new ScoreStore(localStorage);
 const fileSync = createScoreFileSync();
 const recordsPanel = new RecordsPanel(document.body, store, fileSync);
@@ -116,6 +120,7 @@ let match = new Match();
 let versusPlayMs = 0;
 let versusSaved = false;
 const versusLockSeqs: [number, number] = [0, 0];
+const versusGarbageSeen: [number, number] = [0, 0];
 const versusDas = [new DasRepeater(), new DasRepeater()] as const;
 const versusRenderers = [
   new BoardRenderer($<HTMLCanvasElement>('#p1-board'), 26),
@@ -168,9 +173,31 @@ function startVersus(): void {
   versusSaved = false;
   versusLockSeqs[0] = 0;
   versusLockSeqs[1] = 0;
+  versusGarbageSeen[0] = 0;
+  versusGarbageSeen[1] = 0;
   versusDas[0].reset();
   versusDas[1].reset();
   paused = false;
+}
+
+/**
+ * 위기 강도: 스택 높이가 14줄(보이는 영역 상단 6줄 이내)부터 0~1로 상승.
+ * null이면 위기 아님 — 하트비트 정지.
+ */
+function stackDanger(g: Game): number | null {
+  let topRow = BOARD_HEIGHT;
+  outer: for (let y = 0; y < BOARD_HEIGHT; y++) {
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      if (g.board[y]![x] !== null) {
+        topRow = y;
+        break outer;
+      }
+    }
+  }
+  const height = BOARD_HEIGHT - topRow;
+  const dangerStart = 14;
+  if (height < dangerStart) return null;
+  return Math.min(1, (height - dangerStart) / (BOARD_HEIGHT - dangerStart));
 }
 
 function switchMode(next: Mode): void {
@@ -232,15 +259,20 @@ function applyPlayerInput(playerGame: Game, index: 0 | 1, deltaMs: number): void
     keyboard.isAnyDown(keys.right),
     deltaMs,
   );
-  for (let i = 0; i < Math.abs(moves); i++) playerGame.moveActive(moves > 0 ? 1 : -1);
-  if (keyboard.consumePress(keys.rotateCW)) playerGame.rotateActive(1);
-  if (keyboard.consumePress(keys.rotateCCW)) playerGame.rotateActive(-1);
+  let moved = false;
+  for (let i = 0; i < Math.abs(moves); i++) {
+    if (playerGame.moveActive(moves > 0 ? 1 : -1)) moved = true;
+  }
+  if (moved) sfx.move();
+  if (keyboard.consumePress(keys.rotateCW) && playerGame.rotateActive(1)) sfx.rotate();
+  if (keyboard.consumePress(keys.rotateCCW) && playerGame.rotateActive(-1)) sfx.rotate();
   playerGame.setSoftDrop(keyboard.isAnyDown(keys.softDrop));
   if (keyboard.consumePress(keys.hardDrop)) {
+    sfx.hardDrop();
     playerGame.hardDrop();
     shake(versusWraps[index]);
   }
-  if (keyboard.consumePress(keys.hold)) playerGame.holdActive();
+  if (keyboard.consumePress(keys.hold) && playerGame.holdActive()) sfx.hold();
 }
 
 function updateMenu(): void {
@@ -269,21 +301,27 @@ function updateSolo(deltaMs: number): void {
     keyboard.isAnyDown(SOLO_KEYS.right),
     deltaMs,
   );
-  for (let i = 0; i < Math.abs(moves); i++) game.moveActive(moves > 0 ? 1 : -1);
+  let moved = false;
+  for (let i = 0; i < Math.abs(moves); i++) {
+    if (game.moveActive(moves > 0 ? 1 : -1)) moved = true;
+  }
+  if (moved) sfx.move();
 
-  if (keyboard.consumePress(SOLO_KEYS.rotateCW)) game.rotateActive(1);
-  if (keyboard.consumePress(SOLO_KEYS.rotateCCW)) game.rotateActive(-1);
+  if (keyboard.consumePress(SOLO_KEYS.rotateCW) && game.rotateActive(1)) sfx.rotate();
+  if (keyboard.consumePress(SOLO_KEYS.rotateCCW) && game.rotateActive(-1)) sfx.rotate();
   game.setSoftDrop(keyboard.isAnyDown(SOLO_KEYS.softDrop));
   if (keyboard.consumePress(SOLO_KEYS.hardDrop)) {
+    sfx.hardDrop();
     game.hardDrop();
     shake(soloBoardWrap);
   }
-  if (keyboard.consumePress(SOLO_KEYS.hold)) game.holdActive();
+  if (keyboard.consumePress(SOLO_KEYS.hold) && game.holdActive()) sfx.hold();
 
   game.tick(deltaMs);
 
   if (game.isGameOver && !recordSaved) {
     recordSaved = true;
+    sfx.gameOver();
     saveSoloRecord();
   }
 }
@@ -301,6 +339,7 @@ function updateVersus(deltaMs: number): void {
     applyPlayerInput(match.games[0], 0, deltaMs);
     applyPlayerInput(match.games[1], 1, deltaMs);
     match.tick(deltaMs);
+    if (match.roundWinner !== null) sfx.gameOver(); // 이번 틱에 라운드/시리즈 종료
     if (match.isOver && !versusSaved) {
       versusSaved = true;
       saveVersusRecord();
@@ -320,6 +359,7 @@ function updateVersus(deltaMs: number): void {
 }
 
 function update(deltaMs: number): void {
+  if (keyboard.consumePress(MUTE_KEYS)) sfx.toggleMute();
   if (keyboard.consumePress(RECORDS_KEYS)) recordsPanel.toggle();
   if (recordsPanel.visible) {
     // 기록 화면이 열려 있으면 게임 정지, Esc로도 닫기
@@ -346,7 +386,12 @@ function renderSolo(): void {
     lastLockSeq = lock.seq;
     spawnClearPopup(soloBoardWrap, lock);
     soloRenderer.flash(lock.clearedRows);
+    if (lock.linesCleared > 0) sfx.clear(lock.linesCleared, lock.tspin);
+    else sfx.lock();
   }
+
+  // 스택이 천장에 가까워지면 하트비트로 긴장감 고조
+  if (!paused && !game.isGameOver && !recordsPanel.visible) sfx.danger(stackDanger(game));
 
   if (game.isGameOver) {
     soloPause.show(
@@ -370,8 +415,23 @@ function renderVersus(): void {
       versusLockSeqs[i as 0 | 1] = lock.seq;
       spawnClearPopup(versusWraps[i]!, lock);
       versusRenderers[i]!.flash(lock.clearedRows);
+      if (lock.linesCleared > 0) sfx.clear(lock.linesCleared, lock.tspin);
+      else sfx.lock();
     }
+
+    // 가비지 수신 경고음
+    const pendingGarbage = playerGame.garbage.total;
+    if (pendingGarbage > versusGarbageSeen[i]!) sfx.garbage();
+    versusGarbageSeen[i as 0 | 1] = pendingGarbage;
   });
+
+  // 두 보드 중 더 위험한 쪽 기준으로 하트비트
+  if (match.phase === 'playing' && !paused && !recordsPanel.visible) {
+    const dangers = match.games
+      .map((g) => stackDanger(g))
+      .filter((d): d is number => d !== null);
+    sfx.danger(dangers.length > 0 ? Math.max(...dangers) : null);
+  }
 
   if (match.isOver) {
     versusPause.show(
