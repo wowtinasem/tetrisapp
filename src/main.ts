@@ -321,7 +321,11 @@ function updateVersus(deltaMs: number): void {
 
 function update(deltaMs: number): void {
   if (keyboard.consumePress(RECORDS_KEYS)) recordsPanel.toggle();
-  if (recordsPanel.visible) return; // 기록 화면이 열려 있으면 게임 정지
+  if (recordsPanel.visible) {
+    // 기록 화면이 열려 있으면 게임 정지, Esc로도 닫기
+    if (keyboard.consumePress(PAUSE_KEYS)) recordsPanel.close();
+    return;
+  }
 
   if (controlsPanel.visible) {
     if (keyboard.consumePress([...PAUSE_KEYS, ...CONFIRM_KEYS])) controlsPanel.hide();

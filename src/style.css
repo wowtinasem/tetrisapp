@@ -287,8 +287,30 @@ body {
   min-height: 1em;
 }
 
+.records-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+
+.records-return {
+  background: rgba(0, 229, 255, 0.08);
+  color: #6cf3ff;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.records-return:hover {
+  background: rgba(0, 229, 255, 0.16);
+}
+
 .records-close {
-  margin-top: 14px;
   font-size: 11px;
   color: #626a7a;
   text-align: right;

@@ -55,7 +55,10 @@ export class RecordsPanel {
         </div>
         <div class="records-status" data-role="status"></div>
         <div class="records-message" data-role="message"></div>
-        <div class="records-close">Tab 키로 닫기</div>
+        <div class="records-footer">
+          <button type="button" class="records-return" data-role="close">게임으로 돌아가기</button>
+          <div class="records-close">Tab/Esc 키로도 닫기</div>
+        </div>
       </div>`;
     parent.appendChild(this.el);
 
@@ -74,15 +77,25 @@ export class RecordsPanel {
     this.el.querySelector('[data-role="import"]')!.addEventListener('click', () => {
       void this.onImport();
     });
+    this.el.querySelector('[data-role="close"]')!.addEventListener('click', () => {
+      this.close();
+    });
   }
 
   toggle(): void {
-    this.visible = !this.visible;
-    this.el.classList.toggle('hidden', !this.visible);
     if (this.visible) {
-      this.message('');
-      void this.refresh();
+      this.close();
+      return;
     }
+    this.visible = true;
+    this.el.classList.remove('hidden');
+    this.message('');
+    void this.refresh();
+  }
+
+  close(): void {
+    this.visible = false;
+    this.el.classList.add('hidden');
   }
 
   async refresh(): Promise<void> {
