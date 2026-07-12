@@ -1,11 +1,12 @@
-// 진입점: 솔로/대전 모드, 입력/렌더러 연결, 고정 타임스텝(60tps) 게임 루프
-// 메인 메뉴/씬 전환 UI는 Phase 7에서 이 위에 얹는다. (임시: 1 솔로 / 2 대전 키 전환)
+// 진입점: 메뉴/솔로/대전 씬, 입력/렌더러 연결, 고정 타임스텝(60tps) 게임 루프
 
 import './style.css';
 import {
   allBindingCodes,
-  MODE_SOLO_KEYS,
-  MODE_VERSUS_KEYS,
+  CONFIRM_KEYS,
+  MENU_DOWN_KEYS,
+  MENU_KEYS,
+  MENU_UP_KEYS,
   NEXT_ROUND_KEYS,
   PAUSE_KEYS,
   RESTART_KEYS,
@@ -22,21 +23,27 @@ import { spawnClearPopup } from './render/popup';
 import { createScoreFileSync } from './score/fileSync';
 import { ScoreStore, type SoloRecord, type VersusRecord } from './score/scoreStore';
 import { serializeRecord } from './score/txtFormat';
+import { ControlsPanel, MainMenu, type MenuAction } from './ui/menu';
+import { PauseOverlay } from './ui/pause';
 import { RecordsPanel } from './ui/records';
 import { Match } from './versus/match';
 
+type Mode = 'menu' | 'solo' | 'versus';
+
 const RECORDS_KEYS: readonly string[] = ['Tab'];
-const HELP_SOLO =
-  '←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc/P 일시정지 · Tab 기록 · 2 대전';
-const HELP_VERSUS =
-  'P1: A/D 이동 · S 소프트 · W 하드 · F/G 회전 · R/Q 홀드 │ P2: ←→ 이동 · ↓ 소프트 · ↑ 하드 · ./, 회전 · / 홀드 │ Esc 일시정지 · 1 솔로';
+const HELP_TEXT: Record<Mode, string> = {
+  menu: '',
+  solo: '←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc 일시정지 · Tab 기록',
+  versus:
+    'P1: A/D 이동 · S 소프트 · W 하드 · F/G 회전 · R/Q 홀드 │ P2: ←→ 이동 · ↓ 소프트 · ↑ 하드 · ./, 회전 · / 홀드 │ Esc 일시정지',
+};
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
-  <div id="solo-root">
+  <div id="solo-root" class="hidden">
     <div class="game-layout">
       <div class="side" id="left-pane"></div>
-      <div class="board-wrap">
+      <div class="board-wrap" id="solo-wrap">
         <canvas id="board"></canvas>
         <div class="overlay hidden" id="overlay"></div>
       </div>
@@ -64,15 +71,12 @@ app.innerHTML = `
   <p class="help" id="help"></p>
 `;
 
-const $ = <T extends HTMLElement>(selector: string): T =>
-  document.querySelector<T>(selector)!;
+const $ = <T extends HTMLElement>(selector: string): T => document.querySelector<T>(selector)!;
 
 const helpEl = $('#help');
 const soloRoot = $('#solo-root');
 const versusRoot = $('#versus-root');
-const soloOverlay = $('#overlay');
-const versusOverlay = $('#versus-overlay');
-const soloBoardWrap = $<HTMLDivElement>('#solo-root .board-wrap');
+const soloBoardWrap = $('#solo-wrap');
 
 // --- 공용 ---
 const keyboard = new Keyboard(
@@ -81,8 +85,7 @@ const keyboard = new Keyboard(
     ...VERSUS_KEYS.flatMap((k) => allBindingCodes(k)),
     ...PAUSE_KEYS,
     ...RESTART_KEYS,
-    ...MODE_SOLO_KEYS,
-    ...MODE_VERSUS_KEYS,
+    ...MENU_KEYS,
     ...NEXT_ROUND_KEYS,
     ...RECORDS_KEYS,
   ]),
@@ -92,8 +95,10 @@ keyboard.attach();
 const store = new ScoreStore(localStorage);
 const fileSync = createScoreFileSync();
 const recordsPanel = new RecordsPanel(document.body, store, fileSync);
+const controlsPanel = new ControlsPanel(document.body);
+const menu = new MainMenu(app, (action) => onMenuSelect(action));
 
-let mode: 'solo' | 'versus' = 'solo';
+let mode: Mode = 'menu';
 let paused = false;
 
 // --- 솔로 모드 상태 ---
@@ -102,8 +107,9 @@ let lastLockSeq = 0;
 let playTimeMs = 0;
 let recordSaved = false;
 const soloDas = new DasRepeater();
-const soloRenderer = new BoardRenderer($('#board') as unknown as HTMLCanvasElement);
+const soloRenderer = new BoardRenderer($<HTMLCanvasElement>('#board'));
 const soloHud = new Hud($('#left-pane'), $('#right-pane'));
+const soloPause = new PauseOverlay($('#overlay'));
 
 // --- 대전 모드 상태 ---
 let match = new Match();
@@ -112,8 +118,8 @@ let versusSaved = false;
 const versusLockSeqs: [number, number] = [0, 0];
 const versusDas = [new DasRepeater(), new DasRepeater()] as const;
 const versusRenderers = [
-  new BoardRenderer($('#p1-board') as unknown as HTMLCanvasElement, 26),
-  new BoardRenderer($('#p2-board') as unknown as HTMLCanvasElement, 26),
+  new BoardRenderer($<HTMLCanvasElement>('#p1-board'), 26),
+  new BoardRenderer($<HTMLCanvasElement>('#p2-board'), 26),
 ] as const;
 const versusHuds = [
   new Hud($('#p1-left'), $('#p1-right'), 3),
@@ -121,22 +127,73 @@ const versusHuds = [
 ] as const;
 const versusWraps = [$('#p1-wrap'), $('#p2-wrap')] as const;
 const versusWinEls = [$('#p1-wins'), $('#p2-wins')] as const;
+const versusPause = new PauseOverlay($('#versus-overlay'));
 
-function switchMode(next: 'solo' | 'versus'): void {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** 창 크기 대응 보드 스케일링 (PRD 6.4) */
+function layout(): void {
+  const availH = window.innerHeight - 200;
+  if (mode === 'solo') {
+    soloRenderer.resize(clamp(Math.floor(Math.min(availH / 20, (window.innerWidth - 340) / 10)), 16, 34));
+  } else if (mode === 'versus') {
+    const cell = clamp(Math.floor(Math.min(availH / 20, (window.innerWidth - 480) / 20)), 14, 30);
+    versusRenderers[0].resize(cell);
+    versusRenderers[1].resize(cell);
+  }
+}
+window.addEventListener('resize', layout);
+
+/** 하드 드롭 진동 효과 (PRD 6.2) */
+function shake(el: HTMLElement): void {
+  el.classList.remove('shake');
+  void el.offsetWidth; // 리플로우로 애니메이션 재시작
+  el.classList.add('shake');
+}
+
+function startSolo(): void {
+  game = new Game();
+  soloDas.reset();
+  paused = false;
+  lastLockSeq = 0;
+  playTimeMs = 0;
+  recordSaved = false;
+}
+
+function startVersus(): void {
+  match = new Match();
+  versusPlayMs = 0;
+  versusSaved = false;
+  versusLockSeqs[0] = 0;
+  versusLockSeqs[1] = 0;
+  versusDas[0].reset();
+  versusDas[1].reset();
+  paused = false;
+}
+
+function switchMode(next: Mode): void {
   mode = next;
-  paused = mode === 'solo'; // 진행 중이던 솔로 게임은 일시정지 상태로 복귀
   soloRoot.classList.toggle('hidden', mode !== 'solo');
   versusRoot.classList.toggle('hidden', mode !== 'versus');
-  helpEl.textContent = mode === 'solo' ? HELP_SOLO : HELP_VERSUS;
-  if (mode === 'versus') {
-    match = new Match();
-    versusPlayMs = 0;
-    versusSaved = false;
-    versusLockSeqs[0] = 0;
-    versusLockSeqs[1] = 0;
-    versusDas[0].reset();
-    versusDas[1].reset();
-    paused = false;
+  if (mode === 'menu') menu.show();
+  else menu.hide();
+  helpEl.textContent = HELP_TEXT[mode];
+  layout();
+}
+
+function onMenuSelect(action: MenuAction): void {
+  if (action === 'solo') {
+    startSolo();
+    switchMode('solo');
+  } else if (action === 'versus') {
+    startVersus();
+    switchMode('versus');
+  } else if (action === 'records') {
+    recordsPanel.toggle();
+  } else {
+    controlsPanel.show();
   }
 }
 
@@ -179,24 +236,32 @@ function applyPlayerInput(playerGame: Game, index: 0 | 1, deltaMs: number): void
   if (keyboard.consumePress(keys.rotateCW)) playerGame.rotateActive(1);
   if (keyboard.consumePress(keys.rotateCCW)) playerGame.rotateActive(-1);
   playerGame.setSoftDrop(keyboard.isAnyDown(keys.softDrop));
-  if (keyboard.consumePress(keys.hardDrop)) playerGame.hardDrop();
+  if (keyboard.consumePress(keys.hardDrop)) {
+    playerGame.hardDrop();
+    shake(versusWraps[index]);
+  }
   if (keyboard.consumePress(keys.hold)) playerGame.holdActive();
+}
+
+function updateMenu(): void {
+  if (keyboard.consumePress(MENU_UP_KEYS)) menu.moveFocus(-1);
+  if (keyboard.consumePress(MENU_DOWN_KEYS)) menu.moveFocus(1);
+  if (keyboard.consumePress([...CONFIRM_KEYS, ...NEXT_ROUND_KEYS])) menu.activate();
 }
 
 function updateSolo(deltaMs: number): void {
   if (game.isGameOver) {
-    if (keyboard.consumePress(RESTART_KEYS)) {
-      game = new Game();
-      soloDas.reset();
-      paused = false;
-      lastLockSeq = 0;
-      playTimeMs = 0;
-      recordSaved = false;
-    }
+    if (keyboard.consumePress(RESTART_KEYS)) startSolo();
+    else if (keyboard.consumePress(MENU_KEYS)) switchMode('menu');
     return;
   }
   if (keyboard.consumePress(PAUSE_KEYS)) paused = !paused;
-  if (paused) return;
+  if (paused) {
+    if (keyboard.consumePress(CONFIRM_KEYS)) paused = false;
+    else if (keyboard.consumePress(RESTART_KEYS)) startSolo();
+    else if (keyboard.consumePress(MENU_KEYS)) switchMode('menu');
+    return;
+  }
   playTimeMs += deltaMs;
 
   const moves = soloDas.update(
@@ -209,7 +274,10 @@ function updateSolo(deltaMs: number): void {
   if (keyboard.consumePress(SOLO_KEYS.rotateCW)) game.rotateActive(1);
   if (keyboard.consumePress(SOLO_KEYS.rotateCCW)) game.rotateActive(-1);
   game.setSoftDrop(keyboard.isAnyDown(SOLO_KEYS.softDrop));
-  if (keyboard.consumePress(SOLO_KEYS.hardDrop)) game.hardDrop();
+  if (keyboard.consumePress(SOLO_KEYS.hardDrop)) {
+    game.hardDrop();
+    shake(soloBoardWrap);
+  }
   if (keyboard.consumePress(SOLO_KEYS.hold)) game.holdActive();
 
   game.tick(deltaMs);
@@ -223,7 +291,12 @@ function updateSolo(deltaMs: number): void {
 function updateVersus(deltaMs: number): void {
   if (match.phase === 'playing') {
     if (keyboard.consumePress(PAUSE_KEYS)) paused = !paused;
-    if (paused) return;
+    if (paused) {
+      if (keyboard.consumePress(CONFIRM_KEYS)) paused = false;
+      else if (keyboard.consumePress(RESTART_KEYS)) startVersus();
+      else if (keyboard.consumePress(MENU_KEYS)) switchMode('menu');
+      return;
+    }
     versusPlayMs += deltaMs;
     applyPlayerInput(match.games[0], 0, deltaMs);
     applyPlayerInput(match.games[1], 1, deltaMs);
@@ -234,10 +307,15 @@ function updateVersus(deltaMs: number): void {
     }
   } else if (match.phase === 'roundover') {
     if (keyboard.consumePress(NEXT_ROUND_KEYS)) match.nextRound();
-  } else if (keyboard.consumePress([...NEXT_ROUND_KEYS, ...RESTART_KEYS])) {
-    match.rematch();
-    versusPlayMs = 0;
-    versusSaved = false;
+    else if (keyboard.consumePress(MENU_KEYS)) switchMode('menu');
+  } else {
+    if (keyboard.consumePress([...NEXT_ROUND_KEYS, ...RESTART_KEYS])) {
+      match.rematch();
+      versusPlayMs = 0;
+      versusSaved = false;
+    } else if (keyboard.consumePress(MENU_KEYS)) {
+      switchMode('menu');
+    }
   }
 }
 
@@ -245,40 +323,37 @@ function update(deltaMs: number): void {
   if (keyboard.consumePress(RECORDS_KEYS)) recordsPanel.toggle();
   if (recordsPanel.visible) return; // 기록 화면이 열려 있으면 게임 정지
 
-  if (mode === 'solo' && keyboard.consumePress(MODE_VERSUS_KEYS)) {
-    switchMode('versus');
-    return;
-  }
-  if (mode === 'versus' && keyboard.consumePress(MODE_SOLO_KEYS)) {
-    switchMode('solo');
+  if (controlsPanel.visible) {
+    if (keyboard.consumePress([...PAUSE_KEYS, ...CONFIRM_KEYS])) controlsPanel.hide();
     return;
   }
 
-  if (mode === 'solo') updateSolo(deltaMs);
+  if (mode === 'menu') updateMenu();
+  else if (mode === 'solo') updateSolo(deltaMs);
   else updateVersus(deltaMs);
-}
-
-function setOverlay(el: HTMLElement, main: string | null, sub = ''): void {
-  if (main === null) {
-    el.classList.add('hidden');
-    return;
-  }
-  el.innerHTML = `<div>${main}</div>${sub ? `<div class="overlay-sub">${sub}</div>` : ''}`;
-  el.classList.remove('hidden');
 }
 
 function renderSolo(): void {
   soloRenderer.draw(game);
   soloHud.update(game, game.score);
 
-  if (game.lastLock && game.lastLock.seq !== lastLockSeq) {
-    lastLockSeq = game.lastLock.seq;
-    spawnClearPopup(soloBoardWrap, game.lastLock);
+  const lock = game.lastLock;
+  if (lock && lock.seq !== lastLockSeq) {
+    lastLockSeq = lock.seq;
+    spawnClearPopup(soloBoardWrap, lock);
+    soloRenderer.flash(lock.clearedRows);
   }
 
-  if (game.isGameOver) setOverlay(soloOverlay, 'GAME OVER', 'R 키로 재시작');
-  else if (paused) setOverlay(soloOverlay, 'PAUSED', 'Esc/P 키로 계속');
-  else setOverlay(soloOverlay, null);
+  if (game.isGameOver) {
+    soloPause.show(
+      'GAME OVER',
+      `점수 ${game.score.toLocaleString()} · ${game.totalLines}줄 · Lv${game.level}<br>R 재시작 · M 메뉴로`,
+    );
+  } else if (paused) {
+    soloPause.showPause();
+  } else {
+    soloPause.hide();
+  }
 }
 
 function renderVersus(): void {
@@ -290,39 +365,43 @@ function renderVersus(): void {
     if (lock && lock.seq !== versusLockSeqs[i]) {
       versusLockSeqs[i as 0 | 1] = lock.seq;
       spawnClearPopup(versusWraps[i]!, lock);
+      versusRenderers[i]!.flash(lock.clearedRows);
     }
   });
 
-  if (match.phase === 'matchover') {
-    setOverlay(
-      versusOverlay,
+  if (match.isOver) {
+    versusPause.show(
       `PLAYER ${match.matchWinner! + 1} 시리즈 승리! (${match.wins[match.matchWinner!]}-${match.wins[1 - match.matchWinner!]})`,
-      'Space/R 재대결 · 1 솔로 모드',
+      'Space/R 재대결 · M 메뉴로',
     );
   } else if (match.phase === 'roundover') {
-    setOverlay(
-      versusOverlay,
+    versusPause.show(
       `ROUND ${match.round} — PLAYER ${match.roundWinner! + 1} 승리!`,
-      `${match.wins[0]} : ${match.wins[1]} · Space 다음 라운드`,
+      `${match.wins[0]} : ${match.wins[1]} · Space 다음 라운드 · M 메뉴로`,
     );
   } else if (paused) {
-    setOverlay(versusOverlay, 'PAUSED', 'Esc/P 키로 계속');
+    versusPause.showPause();
   } else {
-    setOverlay(versusOverlay, null);
+    versusPause.hide();
   }
 }
 
 function render(): void {
   if (mode === 'solo') renderSolo();
-  else renderVersus();
+  else if (mode === 'versus') renderVersus();
 }
 
-helpEl.textContent = HELP_SOLO;
-
-// #records 해시로 접속하면 기록 화면을 바로 연다 (검증/직접 탐색용)
-if (location.hash === '#records') recordsPanel.toggle();
-// #versus 해시로 접속하면 대전 모드로 시작한다
-if (location.hash === '#versus') switchMode('versus');
+// 시작 씬 결정 (#versus / #records 해시는 검증·직접 탐색용)
+switchMode('menu');
+if (location.hash === '#versus') {
+  startVersus();
+  switchMode('versus');
+} else if (location.hash === '#solo') {
+  startSolo();
+  switchMode('solo');
+} else if (location.hash === '#records') {
+  recordsPanel.toggle();
+}
 
 let last = performance.now();
 let accumulator = 0;

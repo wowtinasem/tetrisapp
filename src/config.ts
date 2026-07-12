@@ -54,9 +54,11 @@ export const VERSUS_TARGET_WINS = 2; // 3판 2선승
 
 export const PAUSE_KEYS: readonly string[] = ['Escape', 'KeyP'];
 export const RESTART_KEYS: readonly string[] = ['KeyR'];
-export const MODE_SOLO_KEYS: readonly string[] = ['Digit1'];
-export const MODE_VERSUS_KEYS: readonly string[] = ['Digit2'];
+export const MENU_KEYS: readonly string[] = ['KeyM'];
+export const CONFIRM_KEYS: readonly string[] = ['Enter'];
 export const NEXT_ROUND_KEYS: readonly string[] = ['Space'];
+export const MENU_UP_KEYS: readonly string[] = ['ArrowUp', 'KeyW'];
+export const MENU_DOWN_KEYS: readonly string[] = ['ArrowDown', 'KeyS'];
 
 export function allBindingCodes(bindings: KeyBindings): string[] {
   return [

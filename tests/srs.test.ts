@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BOARD_HEIGHT, createBoard, type Board } from '../src/core/board';
-import { tryRotate } from '../src/core/srs';
+import { getKickOffsets, tryRotate } from '../src/core/srs';
+import type { Rotation } from '../src/core/piece';
 
 function fullBoardExcept(cells: Array<[number, number]>): Board {
   const board = createBoard();
@@ -62,6 +63,53 @@ describe('tryRotate — 벽킥 (I 전용 테이블)', () => {
     // 세로 I가 왼쪽 벽(열 0)에 붙은 상태
     const result = tryRotate(createBoard(), { type: 'I', rotation: 1, x: -2, y: 5 }, -1);
     expect(result).toEqual({ x: 0, y: 5, rotation: 0, kickIndex: 1 });
+  });
+});
+
+describe('킥 테이블 전수 검증 (PRD 수용 기준: 모든 킥 케이스)', () => {
+  // 표준 SRS 테이블(가이드라인, y위쪽+)을 보드 좌표(y아래쪽+)로 변환한 독립 사본
+  const JLSTZ: Record<string, Array<[number, number]>> = {
+    '0>1': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+    '1>0': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+    '1>2': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+    '2>1': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+    '2>3': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+    '3>2': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+    '3>0': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+    '0>3': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+  };
+  const I: Record<string, Array<[number, number]>> = {
+    '0>1': [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
+    '1>0': [[0, 0], [2, 0], [-1, 0], [2, -1], [-1, 2]],
+    '1>2': [[0, 0], [-1, 0], [2, 0], [-1, -2], [2, 1]],
+    '2>1': [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]],
+    '2>3': [[0, 0], [2, 0], [-1, 0], [2, -1], [-1, 2]],
+    '3>2': [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
+    '3>0': [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]],
+    '0>3': [[0, 0], [-1, 0], [2, 0], [-1, -2], [2, 1]],
+  };
+  const TRANSITIONS: Array<[Rotation, Rotation]> = [
+    [0, 1], [1, 0], [1, 2], [2, 1], [2, 3], [3, 2], [3, 0], [0, 3],
+  ];
+
+  it('JLSTZ 테이블: 8개 전이 × 5개 킥이 표준과 일치한다', () => {
+    for (const type of ['J', 'L', 'S', 'T', 'Z'] as const) {
+      for (const [from, to] of TRANSITIONS) {
+        expect(getKickOffsets(type, from, to), `${type} ${from}>${to}`).toEqual(
+          JLSTZ[`${from}>${to}`],
+        );
+      }
+    }
+  });
+
+  it('I 전용 테이블: 8개 전이 × 5개 킥이 표준과 일치한다', () => {
+    for (const [from, to] of TRANSITIONS) {
+      expect(getKickOffsets('I', from, to), `I ${from}>${to}`).toEqual(I[`${from}>${to}`]);
+    }
+  });
+
+  it('O는 킥 없이 (0,0)만 갖는다', () => {
+    expect(getKickOffsets('O', 0, 1)).toEqual([[0, 0]]);
   });
 });
 

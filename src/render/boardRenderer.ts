@@ -13,9 +13,13 @@ function cellColor(cell: Exclude<CellValue, null>): string {
   return cell === 'G' ? GARBAGE_COLOR : PIECE_COLORS[cell];
 }
 
+const FLASH_DURATION_MS = 150; // PRD 6.2: 150ms 이내, 게임 흐름 방해 금지
+
 export class BoardRenderer {
   private readonly ctx: CanvasRenderingContext2D;
   private cellSize: number;
+  private flashRows: number[] = [];
+  private flashUntil = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement, cellSize = 30) {
     this.cellSize = cellSize;
@@ -23,11 +27,18 @@ export class BoardRenderer {
     this.resize(cellSize);
   }
 
-  /** 창 크기 대응(Phase 7)에서 사용 — 셀 크기를 바꾸면 캔버스도 재조정 */
+  /** 창 크기 대응 — 셀 크기를 바꾸면 캔버스도 재조정 */
   resize(cellSize: number): void {
     this.cellSize = cellSize;
     this.canvas.width = BOARD_WIDTH * cellSize;
     this.canvas.height = VISIBLE_ROWS * cellSize;
+  }
+
+  /** 라인 클리어 플래시 — 지워진 줄 위치를 150ms 동안 하얗게 비춘다 */
+  flash(rows: number[]): void {
+    if (rows.length === 0) return;
+    this.flashRows = rows;
+    this.flashUntil = performance.now() + FLASH_DURATION_MS;
   }
 
   draw(game: Game): void {
@@ -57,12 +68,26 @@ export class BoardRenderer {
       }
     }
 
-    // 대기 가비지 게이지 (왼쪽 가장자리 빨간 바, PRD 3.2)
+    // 라인 클리어 플래시
+    const now = performance.now();
+    if (now < this.flashUntil) {
+      const alpha = 0.55 * ((this.flashUntil - now) / FLASH_DURATION_MS);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+      for (const row of this.flashRows) {
+        if (row >= BUFFER_ROWS) {
+          ctx.fillRect(0, (row - BUFFER_ROWS) * cellSize, this.canvas.width, cellSize);
+        }
+      }
+    }
+
+    // 대기 가비지 게이지 — 깜빡이는 빨간 바로 수신 경고 (PRD 6.2, 3.2)
     const pending = game.garbage.total;
     if (pending > 0) {
       const gaugeHeight = Math.min(pending, VISIBLE_ROWS) * cellSize;
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(now / 120);
       ctx.fillStyle = '#ef4444';
-      ctx.fillRect(0, this.canvas.height - gaugeHeight, 4, gaugeHeight);
+      ctx.fillRect(0, this.canvas.height - gaugeHeight, 5, gaugeHeight);
+      ctx.globalAlpha = 1;
     }
 
     if (!game.active) return;
