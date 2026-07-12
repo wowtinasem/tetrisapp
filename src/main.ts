@@ -9,6 +9,10 @@ import { Keyboard } from './input/keyboard';
 import { BoardRenderer } from './render/boardRenderer';
 import { Hud } from './render/hud';
 import { spawnClearPopup } from './render/popup';
+import { createScoreFileSync } from './score/fileSync';
+import { ScoreStore, type SoloRecord } from './score/scoreStore';
+import { serializeRecord } from './score/txtFormat';
+import { RecordsPanel } from './ui/records';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -20,7 +24,7 @@ app.innerHTML = `
     </div>
     <div class="side" id="right-pane"></div>
   </div>
-  <p class="help">←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc/P 일시정지</p>
+  <p class="help">←→ 이동 · ↓ 소프트 · Space 하드 · ↑/X · Z 회전 · C/Shift 홀드 · Esc/P 일시정지 · Tab 기록</p>
 `;
 
 const boardCanvas = document.querySelector<HTMLCanvasElement>('#board')!;
@@ -30,9 +34,13 @@ const boardWrap = document.querySelector<HTMLDivElement>('.board-wrap')!;
 let game = new Game();
 let paused = false;
 let lastLockSeq = 0;
+let playTimeMs = 0;
+let recordSaved = false;
+
+const RECORDS_KEYS: readonly string[] = ['Tab'];
 
 const keyboard = new Keyboard(
-  new Set([...allBindingCodes(SOLO_KEYS), ...PAUSE_KEYS]),
+  new Set([...allBindingCodes(SOLO_KEYS), ...PAUSE_KEYS, ...RECORDS_KEYS]),
 );
 keyboard.attach();
 const das = new DasRepeater();
@@ -42,18 +50,42 @@ const hud = new Hud(
   document.querySelector<HTMLElement>('#right-pane')!,
 );
 
+const store = new ScoreStore(localStorage);
+const fileSync = createScoreFileSync();
+const recordsPanel = new RecordsPanel(document.body, store, fileSync);
+
+function saveGameOverRecord(): void {
+  const record: SoloRecord = {
+    kind: 'solo',
+    timestamp: Date.now(),
+    player: 'P1',
+    score: game.score,
+    lines: game.totalLines,
+    level: game.level,
+    durationMs: playTimeMs,
+  };
+  store.add(record);
+  void fileSync.appendLine(serializeRecord(record));
+}
+
 function update(deltaMs: number): void {
+  if (keyboard.consumePress(RECORDS_KEYS)) recordsPanel.toggle();
+  if (recordsPanel.visible) return; // 기록 화면이 열려 있으면 게임 정지
+
   if (game.phase === 'gameover') {
     if (keyboard.consumePress(RESTART_KEYS)) {
       game = new Game();
       das.reset();
       paused = false;
       lastLockSeq = 0;
+      playTimeMs = 0;
+      recordSaved = false;
     }
     return;
   }
   if (keyboard.consumePress(PAUSE_KEYS)) paused = !paused;
   if (paused) return;
+  playTimeMs += deltaMs;
 
   const moves = das.update(
     keyboard.isAnyDown(SOLO_KEYS.left),
@@ -69,6 +101,11 @@ function update(deltaMs: number): void {
   if (keyboard.consumePress(SOLO_KEYS.hold)) game.holdActive();
 
   game.tick(deltaMs);
+
+  if (game.isGameOver && !recordSaved) {
+    recordSaved = true;
+    saveGameOverRecord();
+  }
 }
 
 function render(): void {
@@ -90,6 +127,9 @@ function render(): void {
     overlay.classList.add('hidden');
   }
 }
+
+// #records 해시로 접속하면 기록 화면을 바로 연다 (검증/직접 탐색용)
+if (location.hash === '#records') recordsPanel.toggle();
 
 let last = performance.now();
 let accumulator = 0;

@@ -83,6 +83,10 @@ export class Game {
     return this.tracker.score;
   }
 
+  get isGameOver(): boolean {
+    return this.phase === 'gameover';
+  }
+
   preview(count = 5): PieceType[] {
     return this.bag.preview(count);
   }
